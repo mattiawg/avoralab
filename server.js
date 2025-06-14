@@ -13,10 +13,20 @@ const openai = new OpenAI({
 
 // Middleware
 app.use(cors({
-  origin: ['http://localhost:5173', 'https://your-frontend-domain.com'],
-  credentials: true
+  origin: [
+    'http://localhost:5173',
+    'https://zplv56uxy8rdx5ypatb0--api.io',
+    'https://zplv56uxy8rdx5ypatb0.api.io',
+    'https://*.api.io',
+    'https://your-frontend-domain.com'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
-app.use(express.json({ limit: '10mb' }));
+
+// Aggiungi anche questo middleware per gestire preflight requests
+app.options('*', cors());
 
 // Health Check
 app.get('/api/health', (req, res) => {
