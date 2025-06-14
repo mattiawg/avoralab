@@ -11,21 +11,28 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// Middleware
+// Middleware CORS - CONFIGURAZIONE AGGIORNATA
 app.use(cors({
   origin: [
     'http://localhost:5173',
     'https://zplv56uxy8rdx5ypatb0--api.io',
     'https://zplv56uxy8rdx5ypatb0.api.io',
+    'https://zplv56uxy8rdx5ypatb0ockcb9tr6a-oci3--5173--858c0e43.local-credentialless.webcontainer.io',
     'https://*.api.io',
-    'https://your-frontend-domain.com'
+    'https://*.webcontainer.io'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With',
+    'Accept',
+    'Origin'
+  ]
 }));
 
-// Aggiungi anche questo middleware per gestire preflight requests
+// Aggiungi questo middleware per gestire preflight requests
 app.options('*', cors());
 
 // Health Check
