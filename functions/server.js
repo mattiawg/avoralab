@@ -233,7 +233,7 @@ app.post('/api/ai/predict-biometrics', async (req, res) => {
   try {
     const { biometricData, timeframe = '24h' } = req.body;
     
-    // Simple prediction logic (you can enhance this with ML models)
+    // Simple prediction logic
     const predictions = [];
     const alerts = [];
     
@@ -306,8 +306,4 @@ app.listen(PORT, () => {
   console.log(`🚀 AVORA LAB Backend running on port ${PORT}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/api/health`);
   console.log(`🤖 OpenAI configured: ${!!process.env.OPENAI_API_KEY}`);
-});
-
-app.listen(PORT, () => {
-  console.log(`🚀 AVORA LAB Backend running on port ${PORT}`);
 });
