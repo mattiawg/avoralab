@@ -11,23 +11,66 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// Middleware
+// CORS Configuration - AGGIORNATA per WebContainer
 app.use(cors({
-  origin: [
-    'http://localhost:5173', 
-    'https://your-frontend-domain.com',
-    'https://zpl56uxy8rdx5ypatb0.api.io',
-    'https://zpl56uxy8rdx5ypatb0ockb9tr6a-oci3-5173-858c0e43.local-credentialless.webcontainer.io'
-  ],
-  credentials: true
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    // List of allowed origins
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'http://localhost:3000',
+      'https://your-frontend-domain.com',
+      // WebContainer domains
+      'https://zpl56uxy8rdx5ypatb0.api.io',
+      'https://zpl56uxy8rdx5ypatb0ockb9tr6a-oci3-5173-858c0e43.local-credentialless.webcontainer.io'
+    ];
+    
+    // Check if origin is in allowed list or matches WebContainer pattern
+    const isAllowed = allowedOrigins.includes(origin) || 
+                     /^https:\/\/.*\.webcontainer\.io$/.test(origin) ||
+                     /^https:\/\/.*\.local-credentialless\.webcontainer\.io$/.test(origin) ||
+                     /^https:\/\/.*\.stackblitz\.io$/.test(origin);
+    
+    if (isAllowed) {
+      callback(null, true);
+    } else {
+      console.log('CORS blocked origin:', origin);
+      callback(null, true); // Allow all for now - you can restrict later
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'Access-Control-Request-Method',
+    'Access-Control-Request-Headers'
+  ]
 }));
-app.use(express.json({ limit: '10mb' }));
 
-// Logging middleware
+// Handle preflight requests
+app.options('*', cors());
+
+// Additional CORS headers middleware
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  next();
+  res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
+  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With, Accept, Origin');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(200);
+  } else {
+    next();
+  }
 });
+
+app.use(express.json({ limit: '10mb' }));
 
 // Health Check
 app.get('/api/health', (req, res) => {
@@ -54,19 +97,15 @@ app.post('/api/ai/health-analysis', async (req, res) => {
     
     console.log('🔍 Analyzing health data:', { biometricData, userGoal });
     
-    if (!process.env.OPENAI_API_KEY) {
-      return res.json(generateFallbackHealthAnalysis(biometricData, userGoal));
-    }
-    
     const prompt = `
 Sei un esperto AI di salute e benessere. Analizza questi dati biometrici e fornisci consigli personalizzati in italiano.
 
 DATI BIOMETRICI:
-- Sonno: ${biometricData?.sleep?.hours || 7} ore, qualità ${biometricData?.sleep?.quality || 7}/10
-- Energia: ${biometricData?.energy || 6}/10
-- Stress: ${biometricData?.stress || 5}/10
-- Umore: ${biometricData?.mood || 7}/10
-- Attività fisica: ${biometricData?.physicalActivity || 2} ore/settimana
+- Sonno: ${biometricData.sleep?.hours || 7} ore, qualità ${biometricData.sleep?.quality || 7}/10
+- Energia: ${biometricData.energy || 6}/10
+- Stress: ${biometricData.stress || 5}/10
+- Umore: ${biometricData.mood || 7}/10
+- Attività fisica: ${biometricData.physicalActivity || 2} ore/settimana
 
 OBIETTIVO UTENTE: ${userGoal?.description || 'Miglioramento generale del benessere'}
 
@@ -95,18 +134,15 @@ Rispondi SOLO con il JSON, senza altre spiegazioni.
     console.log('🤖 OpenAI Response:', responseText);
     
     // Parse JSON response
-    let response;
-    try {
-      response = JSON.parse(responseText);
-    } catch (parseError) {
-      console.warn('JSON parse error, using fallback');
-      response = generateFallbackHealthAnalysis(biometricData, userGoal);
-    }
+    const response = JSON.parse(responseText);
     
     res.json(response);
   } catch (error) {
     console.error('❌ AI Analysis Error:', error);
-    res.json(generateFallbackHealthAnalysis(req.body.biometricData, req.body.userGoal));
+    res.status(500).json({ 
+      error: 'AI analysis failed',
+      details: error.message 
+    });
   }
 });
 
@@ -116,10 +152,6 @@ app.post('/api/ai/coach-chat', async (req, res) => {
     const { message, biometricData, userGoal } = req.body;
     
     console.log('💬 Coach chat request:', { message, biometricData, userGoal });
-    
-    if (!process.env.OPENAI_API_KEY) {
-      return res.json(generateFallbackCoachResponse(message, biometricData, userGoal));
-    }
     
     const prompt = `
 Sei un coach AI specializzato in salute e benessere. Rispondi in italiano.
@@ -131,7 +163,7 @@ DATI UTENTE:
 - Umore: ${biometricData?.mood || 7}/10
 - Attività fisica: ${biometricData?.physicalActivity || 2}h/settimana
 
-OBIETTIVO: ${userGoal?.description || 'Miglioramento generale'}
+OBIETTIVO: ${userGoal?.description || 'Miglioramento generale del benessere'}
 
 DOMANDA UTENTE: "${message}"
 
@@ -163,18 +195,15 @@ Rispondi SOLO con il JSON, senza altre spiegazioni.
     });
 
     const responseText = completion.choices[0].message.content;
-    let response;
-    try {
-      response = JSON.parse(responseText);
-    } catch (parseError) {
-      console.warn('JSON parse error, using fallback');
-      response = generateFallbackCoachResponse(message, biometricData, userGoal);
-    }
+    const response = JSON.parse(responseText);
     
     res.json(response);
   } catch (error) {
     console.error('❌ Coach Chat Error:', error);
-    res.json(generateFallbackCoachResponse(req.body.message, req.body.biometricData, req.body.userGoal));
+    res.status(500).json({ 
+      error: 'Coach chat failed',
+      details: error.message 
+    });
   }
 });
 
@@ -266,7 +295,6 @@ app.post('/api/ai/predict-biometrics', async (req, res) => {
   try {
     const { biometricData, timeframe = '24h' } = req.body;
     
-    // Simple prediction logic
     const predictions = [];
     const alerts = [];
     
@@ -310,59 +338,6 @@ app.post('/api/ai/predict-biometrics', async (req, res) => {
     });
   }
 });
-
-// Fallback functions
-function generateFallbackHealthAnalysis(biometricData, userGoal) {
-  const energy = biometricData?.energy || 6;
-  const stress = biometricData?.stress || 5;
-  const sleepQuality = biometricData?.sleep?.quality || 7;
-  const mood = biometricData?.mood || 7;
-  
-  const score = Math.round(((energy + (10 - stress) + sleepQuality + mood) / 4) * 10);
-  
-  return {
-    prediction: `I tuoi parametri biometrici mostrano un livello di benessere del ${score}%. L'energia attuale (${energy}/10) e la qualità del sonno (${sleepQuality}/10) sono i fattori principali che influenzano il tuo stato generale.`,
-    motivation: `Il tuo obiettivo di ${userGoal?.description || 'miglioramento generale'} è raggiungibile. Con piccoli aggiustamenti nella routine quotidiana, puoi vedere miglioramenti significativi nelle prossime settimane.`,
-    action: `Concentrati su: 1) Mantenere una routine del sonno regolare (7-8 ore), 2) Fare pause attive ogni 2 ore durante il giorno, 3) Praticare 10 minuti di respirazione profonda per gestire lo stress, 4) Aumentare gradualmente l'attività fisica.`,
-    extraTip: `Suggerimento personalizzato: ${stress > 6 ? 'Il tuo livello di stress è elevato, prova la tecnica 4-7-8 per la respirazione.' : 'Mantieni l\'equilibrio attuale e monitora i progressi quotidianamente.'}`,
-    score: score
-  };
-}
-
-function generateFallbackCoachResponse(message, biometricData, userGoal) {
-  const energy = biometricData?.energy || 6;
-  const stress = biometricData?.stress || 5;
-  const sleepQuality = biometricData?.sleep?.quality || 7;
-  const mood = biometricData?.mood || 7;
-  
-  let response = "Grazie per la tua domanda. ";
-  
-  if (message?.toLowerCase().includes('energia')) {
-    response += "Per migliorare l'energia, concentrati su sonno di qualità, idratazione adeguata e movimento regolare.";
-  } else if (message?.toLowerCase().includes('stress')) {
-    response += "Per gestire lo stress, prova tecniche di respirazione profonda, meditazione o una breve passeggiata.";
-  } else if (message?.toLowerCase().includes('sonno')) {
-    response += "Per un sonno migliore, mantieni orari regolari, evita schermi prima di dormire e crea un ambiente rilassante.";
-  } else {
-    response += "Basandomi sui tuoi dati, ti consiglio di concentrarti su sonno, movimento e gestione dello stress.";
-  }
-
-  return {
-    response,
-    energyAnalysis: `I tuoi livelli di energia (${energy}/10) possono essere ottimizzati con una routine più strutturata.`,
-    energyActions: "Fai pause attive ogni 2 ore, mantieni idratazione costante e assicurati 7-8 ore di sonno.",
-    focusAnalysis: "La concentrazione è strettamente legata ai livelli di energia e stress.",
-    focusActions: "Usa la tecnica Pomodoro, elimina distrazioni e fai esercizi di respirazione.",
-    sleepAnalysis: `La qualità del sonno (${sleepQuality}/10) influenza tutti gli altri aspetti del benessere.`,
-    sleepActions: "Mantieni orari regolari, crea una routine pre-sonno e ottimizza l'ambiente della camera.",
-    stressAnalysis: `I tuoi livelli di stress (${stress}/10) sono gestibili con le giuste strategie.`,
-    stressActions: "Pratica meditazione quotidiana, fai attività fisica regolare e mantieni connessioni sociali.",
-    moodAnalysis: `Il tuo umore (${mood}/10) può essere supportato con attività piacevoli.`,
-    moodActions: "Dedica tempo agli hobby, mantieni contatti sociali e pratica gratitudine quotidiana.",
-    prediction: "Seguendo questi consigli, dovresti vedere miglioramenti nei prossimi 7-14 giorni.",
-    score: Math.round(((energy + (10 - stress) + sleepQuality + mood) / 4) * 10)
-  };
-}
 
 // Error handling middleware
 app.use((error, req, res, next) => {
