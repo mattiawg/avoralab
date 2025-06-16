@@ -1,7 +1,7 @@
 {
   "name": "avoralab-backend",
   "version": "1.0.0",
-  "description": "AVORA LAB AI Backend",
+  "description": "AVORA LAB AI Backend con integrazione Terra",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -11,8 +11,9 @@
     "express": "^4.18.2",
     "openai": "^4.28.0",
     "cors": "^2.8.5",
-    "dotenv": "^16.0.3"
-    "terra-api": "^1.4.0"
+    "dotenv": "^16.0.3",
+    "terra-api": "^1.4.0",
+    "node-fetch": "^3.3.2"
   },
   "engines": {
     "node": ">=18.0.0"
