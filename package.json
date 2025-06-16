@@ -12,7 +12,7 @@
     "openai": "^4.28.0",
     "cors": "^2.8.5",
     "dotenv": "^16.0.3"
-    "terra-api":^1.4.0"
+    "terra-api": "^1.4.0"
   },
   "engines": {
     "node": ">=18.0.0"
