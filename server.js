@@ -1,7 +1,7 @@
 const express = require('express');
 const OpenAI = require('openai');
 const cors = require('cors');
-const Terra = require('terra-api');
+const { Terra } = require('terra-api');
 require('dotenv').config();
 
 const app = express();
@@ -13,13 +13,13 @@ const openai = new OpenAI({
 });
 
 // Initialize Terra
-const terraClient = new Terra.API({
-  devId: process.env.TERRA_DEV_ID,
-  apiKey: process.env.TERRA_API_KEY,
-  secret: process.env.TERRA_SIGNING_SECRET
-});
+const terra = new Terra(
+  process.env.TERRA_DEV_ID,
+  process.env.TERRA_API_KEY,
+  process.env.TERRA_SIGNING_SECRET
+);
 
-// CORS Configuration - AGGIORNATA per WebContainer
+// CORS Configuration - Aggiornata per WebContainer
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
@@ -83,20 +83,150 @@ app.use(express.json({ limit: '10mb' }));
 // Health Check
 app.get('/api/health', (req, res) => {
   res.json({ 
-    stato: 'ok', 
+    status: 'ok', 
     timestamp: new Date().toISOString(),
-    servizio: 'Backend AI AVORA LAB',
+    service: 'AVORA LAB AI Backend',
     openai_configured: !!process.env.OPENAI_API_KEY,
-    terra_configured: !!(process.env.TERRA_DEV_ID && process.env.TERRA_API_KEY && process.env.TERRA_SIGNING_SECRET),
+    terra_configured: !!(process.env.TERRA_DEV_ID && process.env.TERRA_API_KEY),
     endpoints_disponibili: [
       'GET /api/health',
       'POST /api/ai/health-analysis',
       'POST /api/ai/coach-chat',
       'POST /api/ai/health-score',
       'POST /api/ai/recommendations',
-      'POST /api/ai/predict-biometrics'
+      'POST /api/ai/predict-biometrics',
+      'POST /api/terra/auth',
+      'GET /api/terra/data/:userId'
     ]
   });
+});
+
+// Terra Authentication
+app.post('/api/terra/auth', async (req, res) => {
+  try {
+    const { userId, redirectUrl } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+    
+    // Generate Terra widget URL
+    const terraWidgetResponse = await terra.generateWidgetSession({
+      referenceId: userId,
+      language: 'it',
+      authSuccessRedirectUrl: redirectUrl || `${process.env.FRONTEND_URL}/dashboard?device=connected`,
+      authFailureRedirectUrl: `${process.env.FRONTEND_URL}/dashboard?device=failed`
+    });
+    
+    res.json({ 
+      success: true, 
+      authUrl: terraWidgetResponse.authUrl 
+    });
+  } catch (error) {
+    console.error('❌ Terra Auth Error:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate Terra authentication URL',
+      details: error.message 
+    });
+  }
+});
+
+// Get Terra Data
+app.get('/api/terra/data/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { type = 'daily' } = req.query;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+    
+    // Get user from Terra
+    const users = await terra.getUsers({ referenceId: userId });
+    
+    if (!users || users.length === 0) {
+      return res.status(404).json({ error: 'No Terra user found for this userId' });
+    }
+    
+    const terraUser = users[0];
+    
+    // Get data based on type
+    let data;
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - 7); // Last 7 days
+    
+    switch (type) {
+      case 'daily':
+        data = await terra.getDaily(terraUser.userId, from, to);
+        break;
+      case 'sleep':
+        data = await terra.getSleep(terraUser.userId, from, to);
+        break;
+      case 'activity':
+        data = await terra.getActivity(terraUser.userId, from, to);
+        break;
+      case 'body':
+        data = await terra.getBody(terraUser.userId, from, to);
+        break;
+      default:
+        data = await terra.getDaily(terraUser.userId, from, to);
+    }
+    
+    // Transform data to AVORA LAB format
+    const transformedData = transformTerraData(data, type);
+    
+    res.json({
+      success: true,
+      data: transformedData,
+      rawData: data
+    });
+  } catch (error) {
+    console.error('❌ Terra Data Error:', error);
+    res.status(500).json({ 
+      error: 'Failed to get Terra data',
+      details: error.message 
+    });
+  }
+});
+
+// Terra Webhook
+app.post('/api/terra/webhook', async (req, res) => {
+  try {
+    // Verify webhook signature
+    const signature = req.headers['terra-signature'];
+    
+    if (!signature) {
+      return res.status(401).json({ error: 'Missing Terra signature' });
+    }
+    
+    // Process webhook data
+    const { type, data } = req.body;
+    
+    console.log(`📥 Terra Webhook received: ${type}`);
+    
+    switch (type) {
+      case 'user.connected':
+        // Handle new user connection
+        console.log(`🔗 New user connected: ${data.user.userId}`);
+        break;
+      case 'user.disconnected':
+        // Handle user disconnection
+        console.log(`❌ User disconnected: ${data.user.userId}`);
+        break;
+      case 'data.new':
+        // Handle new data
+        console.log(`📊 New data available for user: ${data.user.userId}`);
+        break;
+      default:
+        console.log(`⚠️ Unhandled webhook type: ${type}`);
+    }
+    
+    res.status(200).json({ received: true });
+  } catch (error) {
+    console.error('❌ Terra Webhook Error:', error);
+    res.status(500).json({ error: 'Webhook processing failed' });
+  }
 });
 
 // AI Health Analysis
@@ -348,6 +478,57 @@ app.post('/api/ai/predict-biometrics', async (req, res) => {
   }
 });
 
+// Helper function to transform Terra data
+function transformTerraData(data, type) {
+  if (!data || !data.data || data.data.length === 0) {
+    return null;
+  }
+  
+  // Get the most recent data point
+  const latestData = data.data[data.data.length - 1];
+  
+  switch (type) {
+    case 'daily':
+      return {
+        sleep: {
+          sleep_duration_seconds: latestData.sleep_data?.sleep_duration_seconds || 0,
+          efficiency: latestData.sleep_data?.efficiency || 0,
+          deep_sleep_duration_seconds: latestData.sleep_data?.deep_sleep_duration_seconds || 0,
+          wake_count: latestData.sleep_data?.wake_count || 0
+        },
+        activity: {
+          active_duration_seconds: latestData.activity_data?.active_duration_seconds || 0,
+          steps: latestData.activity_data?.steps || 0,
+          calories_burned: latestData.activity_data?.calories_burned || 0
+        },
+        body: {
+          weight_kg: latestData.body_data?.weight_kg || 0,
+          height_cm: latestData.body_data?.height_cm || 0
+        }
+      };
+    case 'sleep':
+      return {
+        sleep_duration_seconds: latestData.sleep_duration_seconds || 0,
+        efficiency: latestData.efficiency || 0,
+        deep_sleep_duration_seconds: latestData.deep_sleep_duration_seconds || 0,
+        wake_count: latestData.wake_count || 0
+      };
+    case 'activity':
+      return {
+        active_duration_seconds: latestData.active_duration_seconds || 0,
+        steps: latestData.steps || 0,
+        calories_burned: latestData.calories_burned || 0
+      };
+    case 'body':
+      return {
+        weight_kg: latestData.weight_kg || 0,
+        height_cm: latestData.height_cm || 0
+      };
+    default:
+      return latestData;
+  }
+}
+
 // Error handling middleware
 app.use((error, req, res, next) => {
   console.error('❌ Server Error:', error);
@@ -355,46 +536,6 @@ app.use((error, req, res, next) => {
     error: 'Internal server error',
     details: error.message 
   });
-});
-
-// TERRA Webhook endpoint
-app.post('/api/terra/webhook', async (req, res) => {
-  try {
-    const payload = req.body;
-    console.log('📡 Webhook ricevuto da Terra:', JSON.stringify(payload, null, 2));
-
-    // TODO: qui puoi parsare i dati Terra e trasformarli in biometricData
-    const biometricData = {
-      sleep: {
-        hours: payload.data?.sleep?.duration || 6,
-        quality: payload.data?.sleep?.score || 7
-      },
-      energy: 6, // da stimare o calcolare
-      stress: 5, // da stimare o calcolare
-      mood: 7,   // da stimare o mappare
-      physicalActivity: payload.data?.activity?.calories ? 2 : 0
-    };
-
-    const userGoal = {
-      description: 'Migliorare il benessere generale',
-      category: 'energy'
-    };
-
-    // Chiama l'analisi AI interna
-    const aiResponse = await fetch('https://avoralab-production.up.railway.app/api/ai/health-analysis', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ biometricData, userGoal })
-    });
-
-    const result = await aiResponse.json();
-    console.log('🧠 Risposta AI:', result);
-
-    res.status(200).json({ ok: true });
-  } catch (error) {
-    console.error('❌ Errore Webhook Terra:', error);
-    res.status(500).json({ error: 'Webhook processing failed', details: error.message });
-  }
 });
 
 // 404 handler
@@ -407,7 +548,10 @@ app.use('*', (req, res) => {
       'POST /api/ai/coach-chat',
       'POST /api/ai/health-score',
       'POST /api/ai/recommendations',
-      'POST /api/ai/predict-biometrics'
+      'POST /api/ai/predict-biometrics',
+      'POST /api/terra/auth',
+      'GET /api/terra/data/:userId',
+      'POST /api/terra/webhook'
     ]
   });
 });
@@ -416,4 +560,5 @@ app.listen(PORT, () => {
   console.log(`🚀 AVORA LAB Backend running on port ${PORT}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/api/health`);
   console.log(`🤖 OpenAI configured: ${!!process.env.OPENAI_API_KEY}`);
+  console.log(`🌍 Terra configured: ${!!(process.env.TERRA_DEV_ID && process.env.TERRA_API_KEY)}`);
 });
