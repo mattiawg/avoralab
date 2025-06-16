@@ -348,6 +348,46 @@ app.use((error, req, res, next) => {
   });
 });
 
+// TERRA Webhook endpoint
+app.post('/api/terra/webhook', async (req, res) => {
+  try {
+    const payload = req.body;
+    console.log('📡 Webhook ricevuto da Terra:', JSON.stringify(payload, null, 2));
+
+    // TODO: qui puoi parsare i dati Terra e trasformarli in biometricData
+    const biometricData = {
+      sleep: {
+        hours: payload.data?.sleep?.duration || 6,
+        quality: payload.data?.sleep?.score || 7
+      },
+      energy: 6, // da stimare o calcolare
+      stress: 5, // da stimare o calcolare
+      mood: 7,   // da stimare o mappare
+      physicalActivity: payload.data?.activity?.calories ? 2 : 0
+    };
+
+    const userGoal = {
+      description: 'Migliorare il benessere generale',
+      category: 'energy'
+    };
+
+    // Chiama l'analisi AI interna
+    const aiResponse = await fetch('https://avoralab-production.up.railway.app/api/ai/health-analysis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ biometricData, userGoal })
+    });
+
+    const result = await aiResponse.json();
+    console.log('🧠 Risposta AI:', result);
+
+    res.status(200).json({ ok: true });
+  } catch (error) {
+    console.error('❌ Errore Webhook Terra:', error);
+    res.status(500).json({ error: 'Webhook processing failed', details: error.message });
+  }
+});
+
 // 404 handler
 app.use('*', (req, res) => {
   res.status(404).json({ 
