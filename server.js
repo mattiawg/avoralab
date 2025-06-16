@@ -1,6 +1,7 @@
 const express = require('express');
 const OpenAI = require('openai');
 const cors = require('cors');
+const Terra = require('terra-api');
 require('dotenv').config();
 
 const app = express();
@@ -9,6 +10,13 @@ const PORT = process.env.PORT || 3000;
 // Initialize OpenAI
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
+});
+
+// Initialize Terra
+const terraClient = new Terra.API({
+  devId: process.env.TERRA_DEV_ID,
+  apiKey: process.env.TERRA_API_KEY,
+  secret: process.env.TERRA_SIGNING_SECRET
 });
 
 // CORS Configuration - AGGIORNATA per WebContainer
