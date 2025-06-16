@@ -87,6 +87,7 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     servizio: 'Backend AI AVORA LAB',
     openai_configured: !!process.env.OPENAI_API_KEY,
+    terra_configured: !!(process.env.TERRA_DEV_ID && process.env.TERRA_API_KEY && process.env.TERRA_SIGNING_SECRET),
     endpoints_disponibili: [
       'GET /api/health',
       'POST /api/ai/health-analysis',
