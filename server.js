@@ -119,8 +119,8 @@ app.post('/api/terra/auth', async (req, res) => {
     });
     
     res.json({ 
-      url: terraWidgetResponse.authUrl // <-- QUESTO è il campo giusto
-    });
+  authUrl: terraWidgetResponse.url // <-- QUESTO è il campo giusto
+});
   } catch (error) {
     console.error('❌ Terra Auth Error:', error);
     res.status(500).json({ 
